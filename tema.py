@@ -91,10 +91,11 @@ class Ticker:
         # adx and atr for volatility
         data_1h['adx'] = ta.trend.adx(data_1h['high'], data_1h['low'], data_1h['close'], window=14)
         data_1h['atr'] = ta.volatility.average_true_range(data_1h['high'], data_1h['low'], data_1h['close'], window=14)
+        data_1h['atr_z'] = (data_1h['atr'] - data_1h['atr'].rolling(100).mean()) / data_1h['atr'].rolling(100).std()
 
         # applying regime labels
         data_1h['regime'] = np.where(data_1h['adx'] > 20, np.where(data_1h['close'] >= data_1h['ema_200'], 'uptrend', 'downtrend'), 'neutral')
-        data_1h['volatility_regime'] = np.where(data_1h['atr'] > data_1h['atr'].rolling(100).mean(), 'high_vol', 'low_vol')
+        data_1h['volatility_regime'] = np.where(data_1h['atr_z'] > 1, 'high_vol', 'low_vol')
 
         # resampling to 5 mins
         data['regime'] = data_1h['regime'].reindex(data.index, method='ffill')
@@ -208,10 +209,10 @@ if __name__ == '__main__':
     plt.show()
 
 # Best:
-# Train Sharpe Ratio: 1.2884923826643435
-# Test Sharpe Ratio: 1.6017092157729809
-# Test Profit Factor: 1.079949908112905
-# Best QEMA Lookback: 25
+# Train Sharpe Ratio: 1.4884603707605553
+# Test Sharpe Ratio: 2.1671942943405695
+# Test Profit Factor: 1.1442339470290177
+# Best QEMA Lookback: 22
 # Best Fast EMA Period: 10
-# Best Slow EMA Period: 129
+# Best Slow EMA Period: 132
     
