@@ -8,8 +8,8 @@ import os
 import datetime as dt
 from signals import apply_signals
 
-pd.set_option('display.max_rows', 500)
-pd.set_option('display.max_rows', 500)
+pd.set_option('display.max_rows', None)
+pd.set_option('display.max_rows', None)
 
 # defining keys
 API_KEY = 'PK78EB0ZSWAZF9XHSCIW'
@@ -27,22 +27,12 @@ class Ticker:
         self.end = end
         self.initial_balance = initial_balance
 
-        self.train_sharpe = None
-        self.test_pf = None
-        self.test_sharpe = None
-        self.test_return = None
-
-        self.qema_period = None
-        self.ema_period = None
-
-        self.train_data = None
-        self.test_data = None
-
-        self.best_data = None
+        self._load_data()
         
 
+    def _load_data(self, period='10min'):
         # setting filename
-        filename = f"{self.ticker}_{self.start}_{self.end}_5min.csv"
+        filename = f"{self.ticker}_{self.start}_{self.end}_{period}.csv"
 
         # checking if file exists
         if os.path.exists(filename):
@@ -53,13 +43,14 @@ class Ticker:
          
         else: 
             # donwloading data
-            self.data = api.get_bars(self.ticker, timeframe='5min', limit=10000000000, start=self.start, end=self.end, adjustment='split').df
+            self.data = api.get_bars(self.ticker, timeframe=period, limit=10000000000, start=self.start, end=self.end, adjustment='split').df
 
             # setting timestamp
             self.data['timestamp'] = self.data.index 
             self.data['timestamp'] = self.data['timestamp'].dt.tz_convert('America/New_York')
             self.data.set_index(self.data['timestamp'], inplace=True)
             self.data.drop('timestamp', axis=1, inplace=True)
+            self.data = self.data[(self.data.index.time >= pd.Timestamp('09:30').time()) & (self.data.index.time <= pd.Timestamp('15:30').time())]
 
             # calculating log returns
             self.data['log_return'] = np.log(self.data['close']).diff().shift(-1).fillna(0)
@@ -68,8 +59,12 @@ class Ticker:
 
 
     def calculate_returns(self, data):
+        # transaction cost
+        #data['position_change'] = data['position'].diff().fillna(0)
+        #data['transaction_cost'] = abs(data['position_change']) * 0.0001
+
         # calculating strategy returns and cumsum
-        data['strategy_return'] = data['log_return'] * data['position']
+        data['strategy_return'] = data['log_return'] * data['position']# - data['transaction_cost']
         data['cumulative_strategy_returns'] = data['strategy_return'].cumsum()
 
         # appling to balance
@@ -105,19 +100,14 @@ class Ticker:
         train_pf = train_returns[train_returns > 0].sum() / train_returns[train_returns < 0].abs().sum() if train_returns[train_returns < 0].abs().sum() != 0 else 0
         validation_pf = validation_returns[validation_returns > 0].sum() / validation_returns[validation_returns < 0].abs().sum() if validation_returns[validation_returns < 0].abs().sum() != 0 else 0
 
-        # other factors
-        consistency = 1 - min(abs(train_pf - validation_pf) / max(train_pf, validation_pf), 0.5)
         
         trade_count = (train_set['position'].diff() != 0).sum()
         ideal_trades = len(train_set) * 0.005  
-        trade_penalty = max(0, 1 - min(abs(trade_count - ideal_trades) / ideal_trades, 0.5))
 
         # scoring
-        objective_score = (0.4 * validation_pf + 
-                    0.3 * train_pf + 
-                    0.2 * consistency + 
-                    0.1 * trade_penalty)
-    
+        objective_score = (0.7 * validation_pf + 
+                    0.3 * train_pf)
+        
         return objective_score
     
 
@@ -129,7 +119,7 @@ class Ticker:
 
         # running bayesian optimization
         study = optuna.create_study(direction="maximize")
-        study.optimize(self.objective, n_trials=100, n_jobs=-1)
+        study.optimize(self.objective, n_trials=100)
         
         # setting class level vars
         self.ema_period = study.best_params['ema']
@@ -166,16 +156,22 @@ class Ticker:
 
 
     def permute_returns(self):
+        # copying data
         data = self.data.copy()
+        
+        # shuffling log returns
         shuffled = data['log_return'].sample(frac=1.0, replace=False).reset_index(drop=True)
         data['log_return'] = shuffled.values
+
+        # simulating price
         data['price_sim'] = data['close'].iloc[0] * np.exp(data['log_return'].cumsum())
         data['close'] = data['price_sim']
+
         return data
 
 
     def test_perm_data(self, n):
-        # Initializing lists
+        # initializing lists
         sharpes = []
         pfs = []
         returns = []
@@ -202,12 +198,14 @@ class Ticker:
 
 if __name__ == '__main__':
     yesterday = dt.date.today() - dt.timedelta(days=2) # yesterdays date
-    tqqq = Ticker('TQQQ', start='2024-01-01', end=yesterday, initial_balance=1000) # initializing class for stock
+    spy = Ticker('SPY', start='2020-01-01', end=yesterday, initial_balance=1000) # initializing class for stock
 
-    tqqq.optimize(tqqq.data)
-    tqqq.get_test_data()
-    tqqq.display_results()
-    real_pf = tqqq.test_pf
+    spy.optimize(spy.data)
+    spy.get_test_data()
+    print(spy.best_data[spy.best_data['position'] != 0])
+    plt.plot(spy.best_data['balance'].values)
+    plt.plot(spy.best_data['basis'].values)
+    plt.show()
 
     #n = 5
     #df = tqqq.test_perm_data(n)
@@ -223,11 +221,3 @@ if __name__ == '__main__':
     #plt.hist(df[['PFs']])
     #plt.vlines(real_pf, ymin=0, ymax=len(df)/2, color='red')
     #plt.show()
-
-# Best:
-# Train Sharpe Ratio: 2.36
-# Test Sharpe Ratio: 2.33
-# Test Profit Factor: 1.13
-# Test Return: 303.03 %
-# Best QEMA Lookback: 106
-# Best 1H EMA Period: 113
