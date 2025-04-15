@@ -8,8 +8,8 @@ import os
 import datetime as dt
 from signals import apply_signals
 
-pd.set_option('display.max_rows', None)
-pd.set_option('display.max_rows', None)
+pd.set_option('display.max_rows', 10)
+pd.set_option('display.max_rows', 10)
 
 # defining keys
 API_KEY = 'PK78EB0ZSWAZF9XHSCIW'
@@ -100,13 +100,16 @@ class Ticker:
         train_pf = train_returns[train_returns > 0].sum() / train_returns[train_returns < 0].abs().sum() if train_returns[train_returns < 0].abs().sum() != 0 else 0
         validation_pf = validation_returns[validation_returns > 0].sum() / validation_returns[validation_returns < 0].abs().sum() if validation_returns[validation_returns < 0].abs().sum() != 0 else 0
 
-        
-        trade_count = (train_set['position'].diff() != 0).sum()
-        ideal_trades = len(train_set) * 0.005  
+        # get sharpes
+        train_sharpe = train_returns.mean() / train_returns.std() * np.sqrt(252*6*6) if train_returns.std() > 0 else 0
+        validation_sharpe = validation_returns.mean() / validation_returns.std() * np.sqrt(252*6*6) if validation_returns.std() > 0 else 0
 
+        # cumulative log returns
+        train_return = train_returns.cumsum().iloc[-1]
+        validation_return = validation_returns.cumsum().iloc[-1]
+    
         # scoring
-        objective_score = (0.7 * validation_pf + 
-                    0.3 * train_pf)
+        objective_score = 0.45 * (0.7 * validation_pf + 0.3 * train_pf) + 0.25 * (0.7 * validation_sharpe + 0.3 * train_sharpe) + 0.3 * (0.7 * validation_return + 0.3 * train_return)
         
         return objective_score
     
@@ -119,11 +122,12 @@ class Ticker:
 
         # running bayesian optimization
         study = optuna.create_study(direction="maximize")
-        study.optimize(self.objective, n_trials=100)
+        study.optimize(self.objective, n_trials=30)
         
         # setting class level vars
-        self.ema_period = study.best_params['ema']
+        self.best_objective = study.best_value
         self.qema_period = study.best_params['qema']
+        self.ema_period = study.best_params['ema']
 
 
     def get_test_data(self):
@@ -140,16 +144,14 @@ class Ticker:
 
         # getting sharpe
         self.test_pf = r[r>0].sum() / r[r<0].abs().sum()
-        self.test_sharpe = (r.mean() / r.std()) * np.sqrt(48384)
+        self.test_sharpe = (r.mean() / r.std()) * np.sqrt(6*6*252)
         self.test_return = ((self.initial_balance * np.exp(r.cumsum().iloc[-1])) / self.initial_balance - 1) * 100
     
 
     def display_results(self):
         # displating relevant stats
-        print(self.best_data)
+        print(self.best_data[self.best_data['position'] != 0])
         print('# Best:')
-        print('# QEMA Lookback:', self.qema_period)
-        print('# 1H EMA Period:', self.ema_period)
         print('# Test Sharpe Ratio:', round(self.test_sharpe, 2))
         print('# Test Profit Factor:', round(self.test_pf, 2))
         print('# Test Return:', round(self.test_return, 2), '%')
@@ -158,23 +160,32 @@ class Ticker:
     def permute_returns(self):
         # copying data
         data = self.data.copy()
+        result = data.copy()
         
         # shuffling log returns
-        shuffled = data['log_return'].sample(frac=1.0, replace=False).reset_index(drop=True)
-        data['log_return'] = shuffled.values
+        result['log_return'] = np.random.permutation(data['log_return'].values)
 
         # simulating price
-        data['price_sim'] = data['close'].iloc[0] * np.exp(data['log_return'].cumsum())
-        data['close'] = data['price_sim']
+        result['close'] = data['close'].iloc[0] * np.exp(result['log_return'].cumsum())
+
+        for col in ['high', 'low', 'open', 'volume', 'vwap', 'volume']:
+            ratio = result['close'] / data['close']
+            result[col] = result['close'] * ratio
+
+
+        # cleaning dataframe
+        data.drop(columns=[col for col in data.columns if col not in ['close', 'log_return', 'open', 'high', 'volume', 'low']], inplace=True)
+        data.dropna(inplace=True)
 
         return data
 
 
     def test_perm_data(self, n):
         # initializing lists
-        sharpes = []
-        pfs = []
-        returns = []
+        objectives = [self.best_objective]
+        sharpes = [self.test_sharpe]
+        pfs = [self.test_pf]
+        returns = [self.test_return]
 
         # Permuting for n trials
         for i in range(n):
@@ -182,42 +193,47 @@ class Ticker:
 
             # getting data and optimizing on data
             data = self.permute_returns()
+
             self.optimize(data)
             self.get_test_data()
 
             # appending data
+            objectives.append(self.best_objective)
             sharpes.append(self.test_sharpe)
             pfs.append(self.test_pf)
             returns.append(self.test_return)
 
         # creating datafame
-        df = pd.DataFrame({'Sharpes' : sharpes, 'PFs': pfs, 'Returns': returns})
+        df = pd.DataFrame({
+            'Objectives' : objectives,
+            'Sharpes' : sharpes,
+            'PFs': pfs,
+            'Returns': returns
+            })
+        
         return df
 
     
 
 if __name__ == '__main__':
-    yesterday = dt.date.today() - dt.timedelta(days=2) # yesterdays date
-    spy = Ticker('SPY', start='2020-01-01', end=yesterday, initial_balance=1000) # initializing class for stock
+    yesterday = dt.date.today() - dt.timedelta(days=2) # date two days ago
+    TQQQ = Ticker('TQQQ', start='2020-01-01', end=yesterday, initial_balance=1000) # initializing class for stock
 
-    spy.optimize(spy.data)
-    spy.get_test_data()
-    print(spy.best_data[spy.best_data['position'] != 0])
-    plt.plot(spy.best_data['balance'].values)
-    plt.plot(spy.best_data['basis'].values)
+    TQQQ.optimize(TQQQ.data) 
+    TQQQ.get_test_data()
+    real_objective = TQQQ.best_objective
+
+    n = 100
+    df = TQQQ.test_perm_data(n)
+
+    print(df)
+
+    counter = 0
+    for index, row in df.iterrows():
+        if row['Objectives'] > real_objective:
+            counter += 1
+
+    print('Real results are better than', round((1-(counter/n)) * 100, 2),'%' ,'of permuted results')
+    plt.hist(df[['Objectives']])
+    plt.vlines(real_objective, ymin=0, ymax=len(df)/2, color='red')
     plt.show()
-
-    #n = 5
-    #df = tqqq.test_perm_data(n)
-
-    #print(df, real_pf)
-
-    #counter = 0
-    #for index, row in df.iterrows():
-    #    if row['PFs'] > real_pf:
-    #        counter += 1
-
-    #print('Real results are better than', round((1-(counter/n)) * 100, 2),'%' ,'of permuted results')
-    #plt.hist(df[['PFs']])
-    #plt.vlines(real_pf, ymin=0, ymax=len(df)/2, color='red')
-    #plt.show()
