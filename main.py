@@ -348,10 +348,7 @@ if __name__ == '__main__':
     real_data = TQQQ.get_real_data(TQQQ.data)
 
     # running permutation test
-    perms = TQQQ.run_permutation_test(n=100)
+    perms = TQQQ.run_permutation_test(n=0)
 
     # plotting data
     TQQQ.run_results(perms, real_data)
-
-
-# {'qema_period': 87, 'deriv_period': 5, 'bars': 1, 'atr_window': 15, 'atr_multiplier': 11, 'cooldown': 3}

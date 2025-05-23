@@ -15,11 +15,9 @@ This project implements a trading strategy on 1-hour equity data, using a custom
 
 | Metric             | Value    | Percentile vs. Permuted Data |
 | ------------------ | -------- | ---------------------------- |
-| Sharpe Ratio       | 1.91     | 90th percentile              |
-| Profit Factor      | 1.20     | 99th percentile              |
-| Hit Rate           | 52.48%   | 100th percentile             |
-| Annualized Return  | 40.14%   | —                            |
-| Avg Trade Duration | 17.3 hrs | —                            |
+| Sharpe Ratio       | 2.08     | 98.6th percentile            |
+| Profit Factor      | 1.22     | 99.7th percentile            |
+| Hit Rate           | 52.47%   | 99.6th percentile            |
 
 *See `strategy_plots_TQQQ.pdf` for full results.*
 
