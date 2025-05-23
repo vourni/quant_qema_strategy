@@ -15,12 +15,14 @@ api = tradeapi.REST(API_KEY, SECRET_API_KEY, BASE_URL, api_version='v2')
 
 class Ticker:
     def __init__(self, ticker, start, end, timeframe, initial_balance):
+        # intizializing variables
         self.ticker = ticker
         self.start = start
         self.end = end
         self.timeframe = timeframe
         self.initial_balance = initial_balance
 
+        # calling _load_data
         self._load_data()
         
 
@@ -53,11 +55,13 @@ class Ticker:
 
 
     def apply_signals(self, data, period_q, period_d, bars):
+        # applying signals
         data = signals(data, period_q, period_d, bars)
         return data
         
 
     def apply_stop_loss(self, data, atr_window=14, atr_multiplier=2, cooldown=5):
+        # copying data
         data = data.copy()
 
         # calculating average true range
@@ -87,21 +91,27 @@ class Ticker:
         short_exit = (data['drawdown_short'] < data['log_sl_short']) & (data['position'] == -1)
         stop_loss_triggered = long_exit | short_exit
 
+        # setting position to 0 if stop loss triggered
         data.loc[stop_loss_triggered, 'position'] = 0
 
         # setting cool-down
         new_position = []
         cooldown_counter = 0
         for i in range(len(data)):
+            # checking conditions
             if stop_loss_triggered.iloc[i]:
+                # setting counter
                 cooldown_counter = cooldown
+                # appending new positions
                 new_position.append(0)
             elif cooldown_counter > 0:
                 new_position.append(0)
+                # decreasing counter
                 cooldown_counter -= 1
             else:
                 new_position.append(data['position'].iloc[i])
 
+        # updating positions after cooldown
         data['position'] = new_position
 
         # cleaning
@@ -130,7 +140,9 @@ class Ticker:
     
 
     def optimize(self, data, n_trials=30):
+        # objective function
         def objective(trial):
+                # setting params
                 q = trial.suggest_int('qema_period', 80, 150)
                 d = trial.suggest_int('deriv_period', 1, 5)
                 b = trial.suggest_int('bars', 1, 3)
@@ -138,13 +150,16 @@ class Ticker:
                 am = trial.suggest_int('atr_multiplier', 10, 20)
                 c = trial.suggest_int('cooldown', 3, 7)
 
+                # setting objective
                 _,sharpe,pf,_ = self.backtest(data.copy(), q, d, b, aw, am/10, c)
                 return sharpe + pf
 
             
+        # executing study
         study = optuna.create_study(direction='maximize')
         study.optimize(objective, n_trials=n_trials)
 
+        # return params
         best = study.best_params
         return best['qema_period'], best['deriv_period'], best['bars'], best['atr_window'], best['atr_multiplier'] / 10, best['cooldown']
     
@@ -170,7 +185,7 @@ class Ticker:
         hit_rate = correct_direction.mean()
 
         # cleaning
-        data = data[['close', 'log_return', 'position', 'balance', 'basis']]
+        data = data[['close', 'log_return', 'position', 'strategy_return', 'balance', 'basis']]
 
         return data, sharpe, pf, hit_rate
     
@@ -265,6 +280,17 @@ class Ticker:
     def get_real_data(self, data, atr_window=14, atr_multiplier=2, cooldown=5):
         # optimizng real data
         q,d,b,aw,am,c = self.optimize(data)
+        params = {
+            'period_q':q,
+            'period_d':d,
+            'bars':b,
+            'atr_window':aw,
+            'atr_mult':am,
+            'countdown':c
+        }
+
+        self.best_params = pd.DataFrame.from_dict([params])    
+
         real_dataframe, real_sharpe, real_pf, real_hr = self.backtest(data, period_q=q, period_d=d, bars=b, atr_window=aw, atr_multiplier=am, cooldown=c)
 
         # creating list
@@ -285,13 +311,59 @@ class Ticker:
         pf_percentile = (perms['Profit Factors'] < real_pf).mean() * 100
         hr_percentile = (perms['Hit Rates'] < real_hr).mean() * 100
 
+        # max drawdown
+        cumulative = real_dataframe['balance']
+        rolling_max = cumulative.cummax()
+        drawdown = cumulative / rolling_max - 1
+        max_drawdown = drawdown.min()
+
+        # simple return
+        simple_return = np.exp(real_dataframe['strategy_return']) - 1
+        cum_simple_return = (1 + simple_return).cumprod().iloc[-1] - 1
+
+        # win rate and average win
+        trade_return = real_dataframe['strategy_return'].where(real_dataframe['position'] != 0)
+        win_rate = (trade_return > 0).sum() / trade_return.count()
+        avg_win = trade_return[trade_return > 0].mean()
+        avg_loss = trade_return[trade_return < 0].mean()
+
+        # average trade length and number of trades
+        df = real_dataframe.copy()
+        df['position_change'] = df['position'] != df['position'].shift()
+        df['trade_id'] = df['position_change'].cumsum()
+        df['in_trade'] = df['position'] != 0
+        df['trade_id'] = df['trade_id'].where(df['in_trade'])
+        trade_lengths = df.groupby('trade_id').size()
+
+        average_trade_length = trade_lengths.mean()
+        num_trades = trade_lengths.count()
+
         # printing percentiles
         print('\n' + '=' * 33 + ' TEST RESULTS ' + '=' * 33 + '\n')
+
         print(f'Real Sharpe ({real_sharpe:.2f}) is better than {sharpe_percentile:.2f}% of permuted results')
         print(f'Real Profit Factor ({real_pf:.2f}) is better than {pf_percentile:.2f}% of permuted results')
         print(f'Real Hit Rate ({real_hr * 100:.2f}%) is better than {hr_percentile:.2f}% of permuted results')
-        print('\n',real_dataframe)
-        print('\n', real_dataframe['position'].value_counts())
+
+        print('\n' + '-' * 80 + '\n')
+
+        print(f'Max Drawdown: {round(max_drawdown * 100, 2)}%')
+        print(f'Arithmetic Return: {round(cum_simple_return, 2)}x')
+
+        print('\n' + '-' * 80 + '\n')
+
+        print(f'Number of Trades: {num_trades}')
+        print(f'Average Trade Length: {round(average_trade_length, 2)} hours')
+        print(f'Win Rate: {round(win_rate * 100, 2)}%')
+        print(f'Average Win: {round(avg_win * 100, 2)}% per hour of winning trade')
+        print(f'Average Loss: {round(avg_loss * 100, 2)}% per hour of losing trade')
+        
+
+        print('\n' + '-' * 80 + '\n')
+
+        print('Best Parameters:')
+        print(self.best_params)
+
         print('\n' + '=' * 80 + '\n')
 
         # setting figure and plots
