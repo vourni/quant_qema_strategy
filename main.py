@@ -420,7 +420,7 @@ if __name__ == '__main__':
     real_data = TQQQ.get_real_data(TQQQ.data)
 
     # running permutation test
-    perms = TQQQ.run_permutation_test(n=0)
+    perms = TQQQ.run_permutation_test(n=1000)
 
     # plotting data
     TQQQ.run_results(perms, real_data)
