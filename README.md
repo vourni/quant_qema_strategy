@@ -13,6 +13,8 @@ This project implements a trading strategy on 1-hour equity data, using a custom
 
 ## Strategy Performance (TQQQ, 2016–2025)
 
+### Against Permutations
+
 | Metric             | Value    | Percentile vs. Permuted Data |
 | ------------------ | -------- | ---------------------------- |
 | Sharpe Ratio       | 2.08     | 98.6th percentile            |
@@ -20,6 +22,10 @@ This project implements a trading strategy on 1-hour equity data, using a custom
 | Hit Rate           | 52.47%   | 99.6th percentile            |
 
 *See `strategy_plots_TQQQ.pdf` for full results.*
+
+### Metrics
+
+
 
 ## Project Structure
 
