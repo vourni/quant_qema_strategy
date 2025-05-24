@@ -5,6 +5,7 @@ import numpy as np
 import optuna
 import os
 import datetime as dt
+import time
 
 from secret import API_KEY, SECRET_API_KEY, BASE_URL
 
@@ -39,7 +40,8 @@ class Ticker:
          
         else: 
             # donwloading data
-            self.data = api.get_bars(self.ticker, timeframe=self.timeframe, limit=10000000000, start=self.start, end=self.end, adjustment='split').df
+            ### 'adjustment' = 'all' adjusts data for dividends and splits ###
+            self.data = api.get_bars(self.ticker, timeframe=self.timeframe, limit=10000000000, start=self.start, end=self.end, adjustment='all').df
 
             # setting timestamp
             self.data['timestamp'] = self.data.index 
@@ -60,7 +62,7 @@ class Ticker:
         return data
         
 
-    def apply_stop_loss(self, data, atr_window=14, atr_multiplier=2, cooldown=5):
+    def apply_stop_loss(self, data, atr_window=14, atr_multiplier=1, cooldown=5):
         # copying data
         data = data.copy()
 
@@ -72,9 +74,9 @@ class Ticker:
         data['atr'] = tr.rolling(window=atr_window, min_periods=1).mean()
 
         # grouping by trades
-        position_change = (data['position'] != data['position'].shift(1))
+        position_change = (data['position'] != data['position'].shift(1)) & (data['position'].isin([1,-1]))
         data['entry_price'] = data['close'].where(position_change).ffill()
-        data['entry_atr'] = data['atr'].shift(1).where(position_change).ffill()
+        data['entry_atr'] = data['atr'].where(position_change).ffill()
 
         # atr based threshholds
         data['atr_pct'] = atr_multiplier * data['entry_atr'] / data['entry_price']
@@ -123,12 +125,13 @@ class Ticker:
         
 
     def calculate_returns(self, data):
-        # transaction cost
+        # transaction cost / slippage / spread / expense ratio
+        hourly_expense = 0.002 / (252 * 15)
         data['position_change'] = data['position'].diff().fillna(0)
-        data['transaction_cost'] = abs(data['position_change']) * 0.001
+        data['transaction_cost'] = abs(data['position_change']) * 0.0003
 
         # calculating strategy returns and balance
-        data['strategy_return'] = data['log_return'] * data['position'] - data['transaction_cost']
+        data['strategy_return'] = data['log_return'] * data['position'] - data['transaction_cost'] - (hourly_expense * abs(data['position']))
         data['cumulative_strategy_returns'] = data['strategy_return'].cumsum()
         data['balance'] = self.initial_balance * np.exp(data['cumulative_strategy_returns'])
 
@@ -157,7 +160,7 @@ class Ticker:
             
         # executing study
         study = optuna.create_study(direction='maximize')
-        study.optimize(objective, n_trials=n_trials)
+        study.optimize(objective, n_trials=n_trials, n_jobs=1)
 
         # return params
         best = study.best_params
@@ -174,7 +177,7 @@ class Ticker:
         r = data['strategy_return']
 
         # calculating pf and sharpe
-        sharpe = r.mean() / r.std() * np.sqrt(252*16)
+        sharpe = (r.mean() - (0.0435 / (252*15))) / r.std() * np.sqrt(252*15)
         pf = r[r>0].sum() / r[r<0].abs().sum()
 
         # getting signal hit rate
@@ -259,7 +262,7 @@ class Ticker:
             q,d,b,aw,am,c = self.optimize(temp)
 
             # getting data stats
-            temp_data, sharpe, pf, hit_rate = self.backtest(temp, period_q=q, period_d=d, bars=b, atr_window=aw, atr_multiplier=am, cooldown=c)
+            _, sharpe, pf, hit_rate = self.backtest(temp, period_q=q, period_d=d, bars=b, atr_window=aw, atr_multiplier=am, cooldown=c)
 
             # apending lists
             sharpes.append(sharpe)
@@ -293,10 +296,27 @@ class Ticker:
 
         real_dataframe, real_sharpe, real_pf, real_hr = self.backtest(data, period_q=q, period_d=d, bars=b, atr_window=aw, atr_multiplier=am, cooldown=c)
 
+
         # creating list
         real_data = [real_dataframe, real_sharpe, real_pf, real_hr]
 
         return real_data
+    
+
+    def train_test_split_overfit_check(self, test_size=0.2, n_trials=30):
+        # splitting data
+        split_point = int(len(self.data) * (1 - test_size))
+        train_data = self.data.iloc[:split_point].copy()
+        test_data = self.data.iloc[split_point:].copy()
+
+        # Ootimizing on training data
+        q, d, b, aw, am, c = self.optimize(train_data, n_trials=n_trials)
+
+        # evaluating
+        train_eval, train_sharpe, train_pf, train_hr = self.backtest(train_data.copy(), q, d, b, aw, am, c)
+        test_eval, test_sharpe, test_pf, test_hr = self.backtest(test_data.copy(), q, d, b, aw, am, c)
+
+        return train_eval, train_sharpe, train_pf, train_hr, test_eval, test_sharpe, test_pf, test_hr 
 
     
     def run_results(self, perms, real_data):
@@ -312,14 +332,20 @@ class Ticker:
         hr_percentile = (perms['Hit Rates'] < real_hr).mean() * 100
 
         # max drawdown
-        cumulative = real_dataframe['balance']
+        cumulative = real_dataframe['basis']
         rolling_max = cumulative.cummax()
         drawdown = cumulative / rolling_max - 1
         max_drawdown = drawdown.min()
 
-        # simple return
-        simple_return = np.exp(real_dataframe['strategy_return']) - 1
+        # simple return and cagr
+        simple_return = np.exp(real_dataframe['log_return']) - 1
         cum_simple_return = (1 + simple_return).cumprod().iloc[-1] - 1
+
+        start = real_dataframe.index[0]
+        end = real_dataframe.index[-1]
+        delta_days = (end - start).days + (end - start).seconds / (60 * 60 * 24)
+        years = delta_days / 365.25
+        cagr = ((real_dataframe['basis'].iloc[-1]/self.initial_balance) ** (1/years)) - 1
 
         # win rate and average win
         trade_return = real_dataframe['strategy_return'].where(real_dataframe['position'] != 0)
@@ -338,6 +364,9 @@ class Ticker:
         average_trade_length = trade_lengths.mean()
         num_trades = trade_lengths.count()
 
+        # train/test split
+        train_eval, train_sharpe, train_pf, train_hr, test_eval, test_sharpe, test_pf, test_hr  = self.train_test_split_overfit_check()
+
         # printing percentiles
         print('\n' + '=' * 33 + ' TEST RESULTS ' + '=' * 33 + '\n')
 
@@ -349,6 +378,7 @@ class Ticker:
 
         print(f'Max Drawdown: {round(max_drawdown * 100, 2)}%')
         print(f'Arithmetic Return: {round(cum_simple_return, 2)}x')
+        print(f'Compounded Annualized Growth Rate: {round(cagr * 100, 2)}%')
 
         print('\n' + '-' * 80 + '\n')
 
@@ -357,7 +387,12 @@ class Ticker:
         print(f'Win Rate: {round(win_rate * 100, 2)}%')
         print(f'Average Win: {round(avg_win * 100, 2)}% per hour of winning trade')
         print(f'Average Loss: {round(avg_loss * 100, 2)}% per hour of losing trade')
+
+        print('\n' + '-' * 80 + '\n')
         
+        print(f"Train Sharpe: {train_sharpe:.2f}, Test Sharpe: {test_sharpe:.2f}")
+        print(f"Train Profit Factor: {train_pf:.2f}, Test Profit Factor: {test_pf:.2f}")
+        print(f"Train Hit Rate: {train_hr*100:.2f}%, Test Hit Rate: {test_hr*100:.2f}%")
 
         print('\n' + '-' * 80 + '\n')
 
@@ -405,22 +440,41 @@ class Ticker:
         plt.tight_layout()
         plt.savefig(f"strategy_plots_{self.ticker}.pdf", format="pdf", bbox_inches="tight")
 
+        # plotting split comparison
+        plt.figure(figsize=(12, 6))
+        plt.plot(train_eval['balance'], label='Train Strategy')
+        plt.plot(test_eval['balance'], label='Test Strategy')
+        plt.plot(train_eval['basis'], label='Buy/Hold')
+        plt.legend()
+        plt.title('Train vs Test Strategy Performance')
+        plt.xlabel('Time')
+        plt.ylabel('Portfolio Value ($USD)')
+        plt.tight_layout()
+        plt.savefig(f"train_test_check_{self.ticker}.pdf")
+
         # saving csv 
         real_dataframe.to_csv('data.csv')
 
 
 if __name__ == '__main__':
+    # setting start time
+    start_time=time.time()
 
     # intializing class
     yesterday = dt.date.today() - dt.timedelta(days=2) # date two days ago
-    TQQQ = Ticker('TQQQ', start='2016-01-01', end=yesterday, timeframe='1hour', initial_balance=1000) # initializing class for stock
-
+    QQQ = Ticker('QQQ', start='2016-01-01', end=yesterday, timeframe='1hour', initial_balance=1000) # initializing class for stock
 
     # getting real data 
-    real_data = TQQQ.get_real_data(TQQQ.data)
+    real_data = QQQ.get_real_data(QQQ.data)
 
     # running permutation test
-    perms = TQQQ.run_permutation_test(n=1000)
+    perms = QQQ.run_permutation_test(n=0)
 
     # plotting data
-    TQQQ.run_results(perms, real_data)
+    QQQ.run_results(perms, real_data)
+
+    # setting end time
+    end_time=time.time()
+
+    # printing execution time
+    print(f"Execution time: {end_time - start_time:.4f} seconds")
