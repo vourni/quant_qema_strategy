@@ -332,20 +332,20 @@ class Ticker:
         hr_percentile = (perms['Hit Rates'] < real_hr).mean() * 100
 
         # max drawdown
-        cumulative = real_dataframe['basis']
+        cumulative = real_dataframe['balance']
         rolling_max = cumulative.cummax()
         drawdown = cumulative / rolling_max - 1
         max_drawdown = drawdown.min()
 
         # simple return and cagr
-        simple_return = np.exp(real_dataframe['log_return']) - 1
+        simple_return = np.exp(real_dataframe['strategy_return']) - 1
         cum_simple_return = (1 + simple_return).cumprod().iloc[-1] - 1
 
         start = real_dataframe.index[0]
         end = real_dataframe.index[-1]
         delta_days = (end - start).days + (end - start).seconds / (60 * 60 * 24)
         years = delta_days / 365.25
-        cagr = ((real_dataframe['basis'].iloc[-1]/self.initial_balance) ** (1/years)) - 1
+        cagr = ((real_dataframe['balance'].iloc[-1]/self.initial_balance) ** (1/years)) - 1
 
         # win rate and average win
         trade_return = real_dataframe['strategy_return'].where(real_dataframe['position'] != 0)
@@ -462,21 +462,19 @@ if __name__ == '__main__':
 
     # intializing class
     yesterday = dt.date.today() - dt.timedelta(days=2) # date two days ago
-    QQQ = Ticker('QQQ', start='2016-01-01', end=yesterday, timeframe='1hour', initial_balance=1000) # initializing class for stock
+    SPY = Ticker('SPY', start='2016-01-01', end=yesterday, timeframe='1hour', initial_balance=1000) # initializing class for stock
 
     # getting real data 
-    real_data = QQQ.get_real_data(QQQ.data)
+    real_data = SPY.get_real_data(SPY.data)
 
     # running permutation test
-    perms = QQQ.run_permutation_test(n=0)
+    perms = SPY.run_permutation_test(n=0)
 
     # plotting data
-    QQQ.run_results(perms, real_data)
+    SPY.run_results(perms, real_data)
 
     # setting end time
     end_time=time.time()
 
     # printing execution time
     print(f"Execution time: {end_time - start_time:.4f} seconds")
-
-#a
