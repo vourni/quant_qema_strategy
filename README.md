@@ -80,7 +80,8 @@ This project implements a trading strategy on 1-hour equity data, using a custom
 
 ```
 ├── price_data              # Storage for price data
-├── results                 # Storage for results
+├── best_results            # Storage for best results
+├── results                 # Storage for current results
 ├── main.py                 # Main pipeline and testing framework
 ├── generate_signals.py     # Signal logic and filtering
 ├── data.csv                # Final strategy output (returns, positions)

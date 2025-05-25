@@ -29,12 +29,12 @@ class Ticker:
 
     def _load_data(self):
         # setting filename
-        filename = os.path.join('price_data', f"{self.ticker}_{self.start}_{self.end}_{self.timeframe}.csv")
+        filename = os.path.join('price_data', f'{self.ticker}_{self.start}_{self.end}_{self.timeframe}.csv')
 
         # checking if file exists
         if os.path.exists(filename):
             # getting csv
-            print(f"Loading cached data from {filename}")
+            print(f'Loading cached data from {filename}')
             self.data = pd.read_csv(filename, index_col=0, parse_dates=True)
             self.data.index = pd.to_datetime(self.data.index, utc=True).tz_convert('America/New_York')
          
@@ -390,9 +390,9 @@ class Ticker:
 
         print('\n' + '-' * 80 + '\n')
         
-        print(f"Train Sharpe: {train_sharpe:.2f}, Test Sharpe: {test_sharpe:.2f}")
-        print(f"Train Profit Factor: {train_pf:.2f}, Test Profit Factor: {test_pf:.2f}")
-        print(f"Train Hit Rate: {train_hr*100:.2f}%, Test Hit Rate: {test_hr*100:.2f}%")
+        print(f'Train Sharpe: {train_sharpe:.2f}, Test Sharpe: {test_sharpe:.2f}')
+        print(f'Train Profit Factor: {train_pf:.2f}, Test Profit Factor: {test_pf:.2f}')
+        print(f'Train Hit Rate: {train_hr*100:.2f}%, Test Hit Rate: {test_hr*100:.2f}%')
 
         print('\n' + '-' * 80 + '\n')
 
@@ -429,8 +429,8 @@ class Ticker:
         axes[2].set_ylabel('Frequency')
 
         # plotting balance and basis
-        axes[3].plot(real_dataframe['basis'].values, color="red", label='Basis')
-        axes[3].plot(real_dataframe['balance'].values, color="blue", label='Strategy')
+        axes[3].plot(real_dataframe['basis'].values, color='red', label='Basis')
+        axes[3].plot(real_dataframe['balance'].values, color='blue', label='Strategy')
         axes[3].legend()
         axes[3].set_title('Buy/Hold Vs. Strategy')
         axes[3].set_xlabel('Time')
@@ -438,7 +438,7 @@ class Ticker:
 
         # saving and plotting
         plt.tight_layout()
-        plt.savefig(f"strategy_plots_{self.ticker}.pdf", format="pdf", bbox_inches="tight")
+        plt.savefig(os.path.join('results', f'strategy_plots_{self.ticker}.pdf'), format='pdf', bbox_inches='tight')
 
         # plotting split comparison
         plt.figure(figsize=(12, 6))
@@ -450,10 +450,10 @@ class Ticker:
         plt.xlabel('Time')
         plt.ylabel('Portfolio Value ($USD)')
         plt.tight_layout()
-        plt.savefig(f"train_test_check_{self.ticker}.pdf")
+        plt.savefig(os.path.join('results', f'train_test_check_{self.ticker}.pdf'))
 
-        # saving csv 
-        real_dataframe.to_csv('data.csv')
+        # saving data to csv 
+        real_dataframe.to_csv(os.path.join('results','data.csv'))
 
 
 if __name__ == '__main__':
@@ -468,7 +468,7 @@ if __name__ == '__main__':
     real_data = QQQ.get_real_data(QQQ.data)
 
     # running permutation test
-    perms = QQQ.run_permutation_test(n=0)
+    perms = QQQ.run_permutation_test(n=1)
 
     # plotting data
     QQQ.run_results(perms, real_data)
@@ -477,4 +477,4 @@ if __name__ == '__main__':
     end_time=time.time()
 
     # printing execution time
-    print(f"Execution time: {end_time - start_time:.4f} seconds")
+    print(f'Execution time: {end_time - start_time:.4f} seconds')
