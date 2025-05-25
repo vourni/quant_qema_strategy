@@ -33,7 +33,7 @@ This project implements a trading strategy on 1-hour equity data, using a custom
 | Average Trade Length (hours)                        | 16.64    |
 | Win Rate (After fees)                               | 52.67%   |
 | Average Win (Percentage per hour of winning trade)  | 0.19%    |
-| Average Loss (Percentage per hour of winning trade) | -0.17%   |
+| Average Loss (Percentage per hour of losing trade)  | -0.17%   |
 | Arithmetic Return                                   | 9.81x    |
 | Max Drawdown                                        | -9.48%   |
 | Compounded Annual Growth Rate                       | 29.06%   |
