@@ -429,8 +429,8 @@ class Ticker:
         axes[2].set_ylabel('Frequency')
 
         # plotting balance and basis
-        axes[3].plot(real_dataframe['basis'].values, color='red', label='Basis')
-        axes[3].plot(real_dataframe['balance'].values, color='blue', label='Strategy')
+        axes[3].plot(real_dataframe['basis'], color='red', label='Basis')
+        axes[3].plot(real_dataframe['balance'], color='blue', label='Strategy')
         axes[3].legend()
         axes[3].set_title('Buy/Hold Vs. Strategy')
         axes[3].set_xlabel('Time')
